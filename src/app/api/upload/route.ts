@@ -46,8 +46,16 @@ export async function POST(request: Request) {
     session.resumeText = resumeText;
 
     // Ingest into vector store for RAG (if LLM is configured)
-    if (isLLMConfigured()) {
-      await ingestDocument(resumeText, "resume", "resume", session.vectorStore);
+    let llmActive = isLLMConfigured();
+    if (llmActive) {
+      try {
+        await ingestDocument(resumeText, "resume", "resume", session.vectorStore);
+      } catch (err) {
+        logger.error("api.upload", "Failed to ingest resume to vector store (OpenAI error)", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        llmActive = false; // Disable LLM features if embedding fails (e.g. quota exceeded)
+      }
     }
 
     logger.info("api.upload", "Resume uploaded and parsed", {
@@ -60,7 +68,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       sessionId,
       resumeData,
-      llmConfigured: isLLMConfigured(),
+      llmConfigured: llmActive,
     });
   } catch (err) {
     logger.error("api.upload", "Upload failed", {

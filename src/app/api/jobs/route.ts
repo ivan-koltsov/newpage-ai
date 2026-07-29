@@ -47,7 +47,14 @@ export async function POST(request: Request) {
 
     // Ingest JD text into vector store for RAG
     if (isLLMConfigured() && job.rawText) {
-      await ingestDocument(job.rawText, "job", jobId, session.vectorStore);
+      try {
+        await ingestDocument(job.rawText, "job", jobId, session.vectorStore);
+      } catch (err) {
+        logger.error("api.jobs", "Failed to ingest job to vector store (OpenAI error)", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        // Non-fatal error, job is still saved for standard analysis
+      }
     }
 
     logger.info("api.jobs", "Job added", {

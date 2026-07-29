@@ -1,4 +1,4 @@
-import pdfParse from "pdf-parse";
+import PDFParser from "pdf2json";
 import type {
   JobDescription,
   ResumeData,
@@ -38,8 +38,22 @@ const STOPWORDS = new Set([
 // ─── 1. PDF Parsing ─────────────────────────────────────────────────────────
 
 export async function parsePdf(pdfBuffer: Buffer): Promise<string> {
-  const result = await pdfParse(pdfBuffer);
-  return cleanText(result.text);
+  return new Promise((resolve, reject) => {
+    // pdf2json requires instantiation
+    const pdfParser = new PDFParser(null, true);
+
+    pdfParser.on("pdfParser_dataError", (errData: any) =>
+      reject(new Error(errData.parserError?.message || errData.message || "Parse error"))
+    );
+
+    pdfParser.on("pdfParser_dataReady", () => {
+      // getRawTextContent() returns the text. It contains some formatting like \r\n and page separators.
+      const rawText = pdfParser.getRawTextContent();
+      resolve(cleanText(rawText));
+    });
+
+    pdfParser.parseBuffer(pdfBuffer);
+  });
 }
 
 function cleanText(raw: string): string {
