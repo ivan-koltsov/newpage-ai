@@ -36,12 +36,12 @@ export function isLLMConfigured(): boolean {
 
 function getLLMModel(provider: "gemini" | "openai"): string {
   if (process.env.LLM_MODEL) return process.env.LLM_MODEL;
-  return provider === "gemini" ? "gemini-1.5-pro" : "gpt-4o-mini";
+  return provider === "gemini" ? "gemini-flash-latest" : "gpt-4o-mini";
 }
 
 function getEmbeddingModel(provider: "gemini" | "openai"): string {
   if (process.env.EMBEDDING_MODEL) return process.env.EMBEDDING_MODEL;
-  return provider === "gemini" ? "text-embedding-004" : "text-embedding-3-small";
+  return provider === "gemini" ? "gemini-embedding-2" : "text-embedding-3-small";
 }
 
 // ─── Embeddings ──────────────────────────────────────────────────────────────
@@ -231,4 +231,33 @@ export async function chatCompletion(messages: ChatCompletionMessage[]): Promise
   });
 
   return response.choices[0]?.message?.content ?? "";
+}
+
+export async function extractJobDetailsWithLLM(text: string): Promise<any> {
+  const systemPrompt = `You are an expert HR assistant. Extract the following job details from the provided text.
+Return ONLY a valid JSON object with the following keys, and nothing else (no markdown wrappers like \`\`\`json):
+- title: string
+- company: string
+- requiredSkills: array of strings
+- preferredSkills: array of strings
+- minExperienceYears: number (extract the minimum years of experience required, default to 0 if none mentioned)
+- responsibilities: array of strings
+
+If you cannot find a piece of information, use an empty string or empty array as appropriate.`;
+
+  const responseText = await chatCompletion([
+    { role: "system", content: systemPrompt },
+    { role: "user", content: `Here is the job posting text:\n\n${text}` }
+  ]);
+
+  try {
+    let cleaned = responseText.trim();
+    if (cleaned.startsWith("```json")) {
+      cleaned = cleaned.replace(/^```json\n/, "").replace(/\n```$/, "");
+    }
+    return JSON.parse(cleaned);
+  } catch (err) {
+    logger.error("llm", "Failed to parse JSON from LLM extraction", { error: String(err), response: responseText });
+    throw new Error("Failed to parse extracted job details");
+  }
 }

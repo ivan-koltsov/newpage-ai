@@ -11,6 +11,7 @@ import { ChatPanel } from "@/components/ChatPanel";
 
 function AddJobForm({
   onAdd,
+  onImport,
 }: {
   onAdd: (data: {
     title: string;
@@ -21,8 +22,12 @@ function AddJobForm({
     rawText: string;
     responsibilities: string;
   }) => void;
+  onImport: (url: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const [importUrl, setImportUrl] = useState("");
+  const [importing, setImporting] = useState(false);
+
   const [title, setTitle] = useState("");
   const [company, setCompany] = useState("");
   const [requiredSkills, setRequiredSkills] = useState("");
@@ -38,6 +43,20 @@ function AddJobForm({
       </button>
     );
   }
+
+  const handleImport = async () => {
+    if (!importUrl.trim()) return;
+    setImporting(true);
+    try {
+      await onImport(importUrl);
+      setOpen(false);
+      setImportUrl("");
+    } catch (err) {
+      alert(String(err));
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const handleSubmit = () => {
     if (!title.trim() || !company.trim()) return;
@@ -62,6 +81,39 @@ function AddJobForm({
 
   return (
     <div className="add-job-form">
+      <div className="form-group" style={{ paddingBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1rem' }}>
+        <label className="form-label" style={{ color: '#a0a0a0', marginBottom: '8px' }}>
+          ✨ Auto-import from URL (e.g. dou.eu)
+        </label>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input
+            className="form-input"
+            value={importUrl}
+            onChange={(e) => setImportUrl(e.target.value)}
+            placeholder="https://..."
+            style={{ flex: 1 }}
+          />
+          <button 
+            className="import-btn"
+            style={{ 
+              padding: '0 12px', 
+              background: 'rgba(255,255,255,0.1)', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: '6px',
+              cursor: importing || !importUrl ? 'not-allowed' : 'pointer',
+              opacity: importing || !importUrl ? 0.5 : 1
+            }}
+            disabled={importing || !importUrl} 
+            onClick={handleImport}
+          >
+            {importing ? "..." : "Import"}
+          </button>
+        </div>
+      </div>
+      
+      <div style={{ color: '#666', fontSize: '12px', textAlign: 'center', marginBottom: '1rem' }}>— OR MANUALLY ADD —</div>
+
       <div className="form-group">
         <label className="form-label">Job Title *</label>
         <input
@@ -234,6 +286,31 @@ export default function Home() {
     [sessionId, jobs.length]
   );
 
+  // ─── Import Job Handler ─────────────────────────────────────────────
+
+  const handleImportJob = useCallback(
+    async (url: string) => {
+      const res = await fetch("/api/jobs/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, url }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to import job");
+      }
+
+      const data = await res.json();
+      setJobs((prev) => [...prev, data.jobDescription]);
+
+      if (jobs.length === 0) {
+        setSelectedJobId(data.jobDescription.id);
+      }
+    },
+    [sessionId, jobs.length]
+  );
+
   // ─── Delete Job Handler ─────────────────────────────────────────────
 
   const handleDeleteJob = useCallback(
@@ -393,7 +470,7 @@ export default function Home() {
                   onDelete={() => handleDeleteJob(job.id)}
                 />
               ))}
-              <AddJobForm onAdd={handleAddJob} />
+              <AddJobForm onAdd={handleAddJob} onImport={handleImportJob} />
             </div>
           </div>
         </aside>

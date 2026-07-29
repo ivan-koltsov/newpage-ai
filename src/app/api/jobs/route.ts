@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       try {
         await ingestDocument(job.rawText, "job", jobId, session.vectorStore);
       } catch (err) {
-        logger.error("api.jobs", "Failed to ingest job to vector store (OpenAI error)", {
+        logger.error("api.jobs", "Failed to ingest job to vector store (LLM API error)", {
           error: err instanceof Error ? err.message : String(err),
         });
         // Non-fatal error, job is still saved for standard analysis

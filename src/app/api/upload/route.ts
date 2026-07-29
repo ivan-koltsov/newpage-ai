@@ -51,7 +51,7 @@ export async function POST(request: Request) {
       try {
         await ingestDocument(resumeText, "resume", "resume", session.vectorStore);
       } catch (err) {
-        logger.error("api.upload", "Failed to ingest resume to vector store (OpenAI error)", {
+        logger.error("api.upload", "Failed to ingest resume to vector store (LLM API error)", {
           error: err instanceof Error ? err.message : String(err),
         });
         llmActive = false; // Disable LLM features if embedding fails (e.g. quota exceeded)

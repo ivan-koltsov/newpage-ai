@@ -77,4 +77,12 @@ class SessionStore {
 }
 
 /** Singleton session store — shared across all API routes in the same process. */
-export const sessionStore = new SessionStore();
+const globalForStore = globalThis as unknown as {
+  sessionStore: SessionStore | undefined;
+};
+
+export const sessionStore = globalForStore.sessionStore ?? new SessionStore();
+
+if (process.env.NODE_ENV !== "production") {
+  globalForStore.sessionStore = sessionStore;
+}

@@ -77,8 +77,8 @@ export function ChatPanel({
                 {disabled ? (
                   <>
                     Chat is unavailable — set your{" "}
-                    <code>OPENAI_API_KEY</code> in{" "}
-                    <code>.env.local</code> to enable AI-powered Q&A.
+                    <code>OPENAI_API_KEY</code> or <code>GEMINI_API_KEY</code> in <code>.env.local</code> to
+                    enable AI-powered Q&A.
                     <br />
                     <br />
                     Structured analysis (scores, gaps) still works without it!

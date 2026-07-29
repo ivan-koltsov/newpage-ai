@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "cheerio": "^1.2.0",
     "next": "^15.1.0",
     "openai": "^4.70.0",
     "pdf2json": "^4.0.3",
