@@ -1,0 +1,25 @@
+{
+  "name": "newpage-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Career Intelligence Assistant — analyze resumes against job descriptions with RAG-powered Q&A",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "openai": "^4.70.0",
+    "pdf-parse": "^1.1.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.5.0"
+  }
+}
