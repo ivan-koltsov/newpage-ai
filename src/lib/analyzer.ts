@@ -199,10 +199,25 @@ function matchSkill(jdSkill: string, resumeSkills: string[], threshold: number):
   for (const rs of resumeSkills) {
     const normRs = rs.toLowerCase().trim();
     if (normRs.includes(normJd) || normJd.includes(normRs)) {
-      return { skill: jdSkill, matched: true, similarity: 1.0, bestResumeMatch: rs };
+      let displayMatch = rs;
+      if (displayMatch.length > 60) {
+        const idx = normRs.indexOf(normJd);
+        if (idx !== -1) {
+          const start = Math.max(0, idx - 20);
+          const end = Math.min(displayMatch.length, idx + normJd.length + 20);
+          displayMatch = (start > 0 ? "..." : "") + displayMatch.substring(start, end).trim() + (end < displayMatch.length ? "..." : "");
+        } else {
+          displayMatch = displayMatch.substring(0, 60) + "...";
+        }
+      }
+      return { skill: jdSkill, matched: true, similarity: 1.0, bestResumeMatch: displayMatch };
     }
     const sim = jaccardBigramSimilarity(normJd, normRs);
     if (sim > bestScore) { bestScore = sim; bestMatch = rs; }
+  }
+
+  if (bestMatch && bestMatch.length > 60) {
+    bestMatch = bestMatch.substring(0, 60) + "...";
   }
 
   return {
@@ -246,8 +261,14 @@ export function computeAlignment(
     experience: options?.weights?.experience ?? DEFAULT_WEIGHTS.experience,
   };
 
-  const hard = scoreSkillList(job.requiredSkills, resume.skills, threshold);
-  const soft = scoreSkillList(job.preferredSkills, resume.skills, threshold);
+  const searchableTextArray = [
+    ...resume.skills,
+    ...resume.experience.flatMap(e => [e.company, e.role, ...e.bulletPoints]),
+    resume.summary
+  ].filter(s => s && s.trim().length > 0);
+
+  const hard = scoreSkillList(job.requiredSkills, searchableTextArray, threshold);
+  const soft = scoreSkillList(job.preferredSkills, searchableTextArray, threshold);
   const experienceScore = scoreExperience(resume.totalYearsExperience, job.minExperienceYears);
 
   const overallScore =
