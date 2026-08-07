@@ -28,6 +28,16 @@ function AddJobForm({
   const [importUrl, setImportUrl] = useState("");
   const [importing, setImporting] = useState(false);
 
+  const [importMode, setImportMode] = useState<"provider" | "manual">("provider");
+  const [selectedProvider, setSelectedProvider] = useState<string>("https://dou.eu/en/jobs");
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const PROVIDERS = [
+    { name: "DOU.EU", url: "https://dou.eu/en/jobs" },
+    { name: "DOU.UA", url: "https://jobs.dou.ua/" },
+    { name: "LinkedIn", url: "https://www.linkedin.com/jobs/" },
+  ];
+
   const [title, setTitle] = useState("");
   const [company, setCompany] = useState("");
   const [requiredSkills, setRequiredSkills] = useState("");
@@ -51,6 +61,7 @@ function AddJobForm({
       await onImport(importUrl);
       setOpen(false);
       setImportUrl("");
+      setImportMode("provider");
     } catch (err) {
       alert(String(err));
     } finally {
@@ -81,37 +92,139 @@ function AddJobForm({
 
   return (
     <div className="add-job-form">
+      {isModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 9999
+        }}>
+          <div style={{
+            background: '#1a1a1a', padding: '2rem', borderRadius: '12px',
+            maxWidth: '500px', width: '90%', border: '1px solid rgba(255,255,255,0.1)',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
+          }}>
+            <h2 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem' }}>Import from {PROVIDERS.find(p => p.url === selectedProvider)?.name}</h2>
+            
+            <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+              <button 
+                className="btn btn-primary"
+                onClick={() => window.open(selectedProvider, '_blank')}
+              >
+                Browse {PROVIDERS.find(p => p.url === selectedProvider)?.name}
+              </button>
+              <span style={{ color: '#a0a0a0', fontSize: '0.9rem' }}>Find a job and copy its URL</span>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '1.5rem' }}>
+              <input
+                className="form-input"
+                value={importUrl}
+                onChange={(e) => setImportUrl(e.target.value)}
+                placeholder="Paste job URL here (https://...)"
+                style={{ flex: 1 }}
+              />
+              <button 
+                className="import-btn"
+                style={{ 
+                  padding: '0 12px', 
+                  background: 'rgba(255,255,255,0.1)', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: '6px',
+                  cursor: importing || !importUrl ? 'not-allowed' : 'pointer',
+                  opacity: importing || !importUrl ? 0.5 : 1
+                }}
+                disabled={importing || !importUrl} 
+                onClick={async () => {
+                  await handleImport();
+                  setIsModalOpen(false);
+                }}
+              >
+                {importing ? "..." : "Import"}
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setIsModalOpen(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="form-group" style={{ paddingBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1rem' }}>
         <label className="form-label" style={{ color: '#a0a0a0', marginBottom: '8px' }}>
-          ✨ Auto-import from URL (e.g. dou.eu)
+          ✨ Auto-import from URL
         </label>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <input
-            className="form-input"
-            value={importUrl}
-            onChange={(e) => setImportUrl(e.target.value)}
-            placeholder="https://..."
-            style={{ flex: 1 }}
-          />
-          <button 
-            className="import-btn"
-            style={{ 
-              padding: '0 12px', 
-              background: 'rgba(255,255,255,0.1)', 
-              color: 'white', 
-              border: 'none', 
-              borderRadius: '6px',
-              cursor: importing || !importUrl ? 'not-allowed' : 'pointer',
-              opacity: importing || !importUrl ? 0.5 : 1
-            }}
-            disabled={importing || !importUrl} 
-            onClick={handleImport}
-          >
-            {importing ? "..." : "Import"}
-          </button>
-        </div>
+
+        {importMode === "provider" ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <select
+                className="form-input"
+                value={selectedProvider}
+                onChange={(e) => setSelectedProvider(e.target.value)}
+                style={{ flex: 1, cursor: 'pointer' }}
+              >
+                {PROVIDERS.map(p => (
+                  <option key={p.name} value={p.url}>{p.name}</option>
+                ))}
+              </select>
+              <button
+                className="btn btn-primary"
+                style={{ padding: '0 12px' }}
+                onClick={() => setIsModalOpen(true)}
+              >
+                Find Job
+              </button>
+            </div>
+            <button
+              className="btn btn-ghost"
+              style={{ alignSelf: 'flex-start', fontSize: '12px', padding: '4px 8px', marginTop: '4px' }}
+              onClick={() => setImportMode("manual")}
+            >
+              ✎ Enter Job URL Manually
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                className="form-input"
+                value={importUrl}
+                onChange={(e) => setImportUrl(e.target.value)}
+                placeholder="https://..."
+                style={{ flex: 1 }}
+              />
+              <button
+                className="import-btn"
+                style={{
+                  padding: '0 12px',
+                  background: 'rgba(255,255,255,0.1)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: importing || !importUrl ? 'not-allowed' : 'pointer',
+                  opacity: importing || !importUrl ? 0.5 : 1
+                }}
+                disabled={importing || !importUrl}
+                onClick={handleImport}
+              >
+                {importing ? "..." : "Import"}
+              </button>
+            </div>
+            <button
+              className="btn btn-ghost"
+              style={{ alignSelf: 'flex-start', fontSize: '12px', padding: '4px 8px', marginTop: '4px' }}
+              onClick={() => setImportMode("provider")}
+            >
+              ← Back to Providers
+            </button>
+          </div>
+        )}
       </div>
-      
+
       <div style={{ color: '#666', fontSize: '12px', textAlign: 'center', marginBottom: '1rem' }}>— OR MANUALLY ADD —</div>
 
       <div className="form-group">

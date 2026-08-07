@@ -42,30 +42,56 @@ export function isLLMConfigured(): boolean {
 
 // ─── Model Configuration ────────────────────────────────────────────────────
 
-function getLLMModel(provider: "gemini" | "openai"): string {
+function getLLMModels(provider: "gemini" | "openai"): string[] {
   if (provider === "gemini") {
-    return process.env.GEMINI_LLM_MODEL || 
-      (process.env.LLM_MODEL?.includes("gemini") ? process.env.LLM_MODEL : "gemini-1.5-flash");
+    let baseModel = process.env.GEMINI_LLM_MODEL || process.env.LLM_MODEL;
+    if (!baseModel || !baseModel.includes("gemini")) baseModel = "gemini-flash-latest";
+    const cascade = [baseModel];
+    if (baseModel !== "gemini-3.1-pro-preview") cascade.push("gemini-3.1-pro-preview");
+    if (baseModel !== "gemini-2.5-flash") cascade.push("gemini-2.5-flash");
+    return cascade;
   }
-  return process.env.OPENAI_LLM_MODEL || 
-    (process.env.LLM_MODEL?.includes("gpt") ? process.env.LLM_MODEL : "gpt-4o-mini");
+  return [process.env.OPENAI_LLM_MODEL || (process.env.LLM_MODEL?.includes("gpt") ? process.env.LLM_MODEL : "gpt-4o-mini")];
 }
 
-function getEmbeddingModel(provider: "gemini" | "openai"): string {
+function getEmbeddingModels(provider: "gemini" | "openai"): string[] {
   if (provider === "gemini") {
-    return process.env.GEMINI_EMBEDDING_MODEL || 
-      (process.env.EMBEDDING_MODEL?.includes("embedding-2") || process.env.EMBEDDING_MODEL?.includes("text-embedding-004") ? process.env.EMBEDDING_MODEL : "text-embedding-004");
+    let baseModel = process.env.GEMINI_EMBEDDING_MODEL || process.env.EMBEDDING_MODEL;
+    if (!baseModel || (!baseModel.includes("gemini-embedding") && baseModel !== "text-embedding-004")) baseModel = "gemini-embedding-2";
+    if (baseModel === "text-embedding-004") baseModel = "gemini-embedding-2";
+    const cascade = [baseModel];
+    if (baseModel !== "gemini-embedding-001") cascade.push("gemini-embedding-001");
+    return cascade;
   }
-  return process.env.OPENAI_EMBEDDING_MODEL || 
-    (process.env.EMBEDDING_MODEL?.includes("text-embedding-3") ? process.env.EMBEDDING_MODEL : "text-embedding-3-small");
+  return [process.env.OPENAI_EMBEDDING_MODEL || (process.env.EMBEDDING_MODEL?.includes("text-embedding-3") ? process.env.EMBEDDING_MODEL : "text-embedding-3-small")];
+}
+
+async function executeWithCascade<T>(
+  provider: "gemini" | "openai",
+  getModels: (p: "gemini" | "openai") => string[],
+  fn: (provider: "gemini" | "openai", model: string) => Promise<T>
+): Promise<T> {
+  const models = getModels(provider);
+  let lastErr: any;
+  for (const model of models) {
+    try {
+      return await fn(provider, model);
+    } catch (err: any) {
+      lastErr = err;
+      const isRetryable = err.status === 503 || err.status === 429 || err.message?.includes("503") || err.message?.includes("429");
+      if (!isRetryable || models.indexOf(model) === models.length - 1) {
+        throw err;
+      }
+      logger.warn("llm", `Provider ${provider} model ${model} failed with retryable error, cascading...`, { error: err.message });
+    }
+  }
+  throw lastErr;
 }
 
 // ─── Embeddings ──────────────────────────────────────────────────────────────
 
-async function _getEmbedding(text: string, provider: "gemini" | "openai"): Promise<number[]> {
-  const model = getEmbeddingModel(provider);
+async function _getEmbedding(text: string, provider: "gemini" | "openai", model: string): Promise<number[]> {
   const start = Date.now();
-
   let embedding: number[];
 
   if (provider === "gemini") {
@@ -90,27 +116,30 @@ async function _getEmbedding(text: string, provider: "gemini" | "openai"): Promi
 export async function getEmbedding(text: string): Promise<number[]> {
   const primary = getPrimaryProvider();
   try {
-    return await _getEmbedding(text, primary);
+    return await executeWithCascade(primary, getEmbeddingModels, (p, m) => _getEmbedding(text, p, m));
   } catch (err) {
     const fallback = getFallbackProvider(primary);
     if (fallback) {
       logger.error("llm", `Primary provider ${primary} failed, falling back to ${fallback}`, { error: String(err) });
-      return await _getEmbedding(text, fallback);
+      try {
+        return await executeWithCascade(fallback, getEmbeddingModels, (p, m) => _getEmbedding(text, p, m));
+      } catch (fallbackErr) {
+        throw new Error(`[${primary} failed: ${err instanceof Error ? err.message : String(err)}] -> [Fallback ${fallback} failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}]`);
+      }
     }
     throw err;
   }
 }
 
-async function _getEmbeddings(texts: string[], provider: "gemini" | "openai"): Promise<number[][]> {
+async function _getEmbeddings(texts: string[], provider: "gemini" | "openai", model: string): Promise<number[][]> {
   if (texts.length === 0) return [];
   
   if (provider === "gemini") {
     // Gemini doesn't have a direct batch endpoint in the simple SDK, so we do it in parallel
-    const embeddings = await Promise.all(texts.map(text => _getEmbedding(text, provider)));
+    const embeddings = await Promise.all(texts.map(text => _getEmbedding(text, provider, model)));
     return embeddings;
   }
 
-  const model = getEmbeddingModel("openai");
   const start = Date.now();
   const client = getOpenAIClient();
 
@@ -129,12 +158,16 @@ async function _getEmbeddings(texts: string[], provider: "gemini" | "openai"): P
 export async function getEmbeddings(texts: string[]): Promise<number[][]> {
   const primary = getPrimaryProvider();
   try {
-    return await _getEmbeddings(texts, primary);
+    return await executeWithCascade(primary, getEmbeddingModels, (p, m) => _getEmbeddings(texts, p, m));
   } catch (err) {
     const fallback = getFallbackProvider(primary);
     if (fallback) {
       logger.error("llm", `Primary provider ${primary} failed, falling back to ${fallback}`, { error: String(err) });
-      return await _getEmbeddings(texts, fallback);
+      try {
+        return await executeWithCascade(fallback, getEmbeddingModels, (p, m) => _getEmbeddings(texts, p, m));
+      } catch (fallbackErr) {
+        throw new Error(`[${primary} failed: ${err instanceof Error ? err.message : String(err)}] -> [Fallback ${fallback} failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}]`);
+      }
     }
     throw err;
   }
@@ -149,9 +182,9 @@ export interface ChatCompletionMessage {
 
 async function _streamChatCompletion(
   messages: ChatCompletionMessage[],
-  provider: "gemini" | "openai"
+  provider: "gemini" | "openai",
+  model: string
 ): Promise<ReadableStream<Uint8Array>> {
-  const model = getLLMModel(provider);
   const start = Date.now();
   const encoder = new TextEncoder();
 
@@ -228,19 +261,22 @@ export async function streamChatCompletion(
 ): Promise<ReadableStream<Uint8Array>> {
   const primary = getPrimaryProvider();
   try {
-    return await _streamChatCompletion(messages, primary);
+    return await executeWithCascade(primary, getLLMModels, (p, m) => _streamChatCompletion(messages, p, m));
   } catch (err) {
     const fallback = getFallbackProvider(primary);
     if (fallback) {
       logger.error("llm", `Primary provider ${primary} failed, falling back to ${fallback}`, { error: String(err) });
-      return await _streamChatCompletion(messages, fallback);
+      try {
+        return await executeWithCascade(fallback, getLLMModels, (p, m) => _streamChatCompletion(messages, p, m));
+      } catch (fallbackErr) {
+        throw new Error(`[${primary} failed: ${err instanceof Error ? err.message : String(err)}] -> [Fallback ${fallback} failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}]`);
+      }
     }
     throw err;
   }
 }
 
-async function _chatCompletion(messages: ChatCompletionMessage[], provider: "gemini" | "openai"): Promise<string> {
-  const model = getLLMModel(provider);
+async function _chatCompletion(messages: ChatCompletionMessage[], provider: "gemini" | "openai", model: string): Promise<string> {
   const start = Date.now();
 
   if (provider === "gemini") {
@@ -292,12 +328,16 @@ async function _chatCompletion(messages: ChatCompletionMessage[], provider: "gem
 export async function chatCompletion(messages: ChatCompletionMessage[]): Promise<string> {
   const primary = getPrimaryProvider();
   try {
-    return await _chatCompletion(messages, primary);
+    return await executeWithCascade(primary, getLLMModels, (p, m) => _chatCompletion(messages, p, m));
   } catch (err) {
     const fallback = getFallbackProvider(primary);
     if (fallback) {
       logger.error("llm", `Primary provider ${primary} failed, falling back to ${fallback}`, { error: String(err) });
-      return await _chatCompletion(messages, fallback);
+      try {
+        return await executeWithCascade(fallback, getLLMModels, (p, m) => _chatCompletion(messages, p, m));
+      } catch (fallbackErr) {
+        throw new Error(`[${primary} failed: ${err instanceof Error ? err.message : String(err)}] -> [Fallback ${fallback} failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}]`);
+      }
     }
     throw err;
   }
