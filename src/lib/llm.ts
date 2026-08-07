@@ -7,10 +7,18 @@ import { logger } from "./logger";
 let _openaiClient: OpenAI | null = null;
 let _geminiClient: GoogleGenerativeAI | null = null;
 
-function getActiveProvider(): "gemini" | "openai" {
-  if (process.env.GEMINI_API_KEY) return "gemini";
+function getPrimaryProvider(): "gemini" | "openai" {
+  if (process.env.LLM_PROVIDER === "openai" && process.env.OPENAI_API_KEY) return "openai";
+  if (process.env.LLM_PROVIDER === "gemini" && process.env.GEMINI_API_KEY) return "gemini";
   if (process.env.OPENAI_API_KEY) return "openai";
+  if (process.env.GEMINI_API_KEY) return "gemini";
   throw new Error("No LLM API key configured. Set GEMINI_API_KEY or OPENAI_API_KEY.");
+}
+
+function getFallbackProvider(primary: "gemini" | "openai"): "gemini" | "openai" | null {
+  if (primary === "openai" && process.env.GEMINI_API_KEY) return "gemini";
+  if (primary === "gemini" && process.env.OPENAI_API_KEY) return "openai";
+  return null;
 }
 
 function getOpenAIClient(): OpenAI {
@@ -35,19 +43,26 @@ export function isLLMConfigured(): boolean {
 // ─── Model Configuration ────────────────────────────────────────────────────
 
 function getLLMModel(provider: "gemini" | "openai"): string {
-  if (process.env.LLM_MODEL) return process.env.LLM_MODEL;
-  return provider === "gemini" ? "gemini-flash-latest" : "gpt-4o-mini";
+  if (provider === "gemini") {
+    return process.env.GEMINI_LLM_MODEL || 
+      (process.env.LLM_MODEL?.includes("gemini") ? process.env.LLM_MODEL : "gemini-1.5-flash");
+  }
+  return process.env.OPENAI_LLM_MODEL || 
+    (process.env.LLM_MODEL?.includes("gpt") ? process.env.LLM_MODEL : "gpt-4o-mini");
 }
 
 function getEmbeddingModel(provider: "gemini" | "openai"): string {
-  if (process.env.EMBEDDING_MODEL) return process.env.EMBEDDING_MODEL;
-  return provider === "gemini" ? "gemini-embedding-2" : "text-embedding-3-small";
+  if (provider === "gemini") {
+    return process.env.GEMINI_EMBEDDING_MODEL || 
+      (process.env.EMBEDDING_MODEL?.includes("embedding-2") || process.env.EMBEDDING_MODEL?.includes("text-embedding-004") ? process.env.EMBEDDING_MODEL : "text-embedding-004");
+  }
+  return process.env.OPENAI_EMBEDDING_MODEL || 
+    (process.env.EMBEDDING_MODEL?.includes("text-embedding-3") ? process.env.EMBEDDING_MODEL : "text-embedding-3-small");
 }
 
 // ─── Embeddings ──────────────────────────────────────────────────────────────
 
-export async function getEmbedding(text: string): Promise<number[]> {
-  const provider = getActiveProvider();
+async function _getEmbedding(text: string, provider: "gemini" | "openai"): Promise<number[]> {
   const model = getEmbeddingModel(provider);
   const start = Date.now();
 
@@ -72,14 +87,26 @@ export async function getEmbedding(text: string): Promise<number[]> {
   return embedding;
 }
 
-export async function getEmbeddings(texts: string[]): Promise<number[][]> {
+export async function getEmbedding(text: string): Promise<number[]> {
+  const primary = getPrimaryProvider();
+  try {
+    return await _getEmbedding(text, primary);
+  } catch (err) {
+    const fallback = getFallbackProvider(primary);
+    if (fallback) {
+      logger.error("llm", `Primary provider ${primary} failed, falling back to ${fallback}`, { error: String(err) });
+      return await _getEmbedding(text, fallback);
+    }
+    throw err;
+  }
+}
+
+async function _getEmbeddings(texts: string[], provider: "gemini" | "openai"): Promise<number[][]> {
   if (texts.length === 0) return [];
-  
-  const provider = getActiveProvider();
   
   if (provider === "gemini") {
     // Gemini doesn't have a direct batch endpoint in the simple SDK, so we do it in parallel
-    const embeddings = await Promise.all(texts.map(text => getEmbedding(text)));
+    const embeddings = await Promise.all(texts.map(text => _getEmbedding(text, provider)));
     return embeddings;
   }
 
@@ -99,6 +126,20 @@ export async function getEmbeddings(texts: string[]): Promise<number[][]> {
   return response.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
 }
 
+export async function getEmbeddings(texts: string[]): Promise<number[][]> {
+  const primary = getPrimaryProvider();
+  try {
+    return await _getEmbeddings(texts, primary);
+  } catch (err) {
+    const fallback = getFallbackProvider(primary);
+    if (fallback) {
+      logger.error("llm", `Primary provider ${primary} failed, falling back to ${fallback}`, { error: String(err) });
+      return await _getEmbeddings(texts, fallback);
+    }
+    throw err;
+  }
+}
+
 // ─── Chat Completions ────────────────────────────────────────────────────────
 
 export interface ChatCompletionMessage {
@@ -106,10 +147,10 @@ export interface ChatCompletionMessage {
   content: string;
 }
 
-export async function streamChatCompletion(
-  messages: ChatCompletionMessage[]
+async function _streamChatCompletion(
+  messages: ChatCompletionMessage[],
+  provider: "gemini" | "openai"
 ): Promise<ReadableStream<Uint8Array>> {
-  const provider = getActiveProvider();
   const model = getLLMModel(provider);
   const start = Date.now();
   const encoder = new TextEncoder();
@@ -182,8 +223,23 @@ export async function streamChatCompletion(
   });
 }
 
-export async function chatCompletion(messages: ChatCompletionMessage[]): Promise<string> {
-  const provider = getActiveProvider();
+export async function streamChatCompletion(
+  messages: ChatCompletionMessage[]
+): Promise<ReadableStream<Uint8Array>> {
+  const primary = getPrimaryProvider();
+  try {
+    return await _streamChatCompletion(messages, primary);
+  } catch (err) {
+    const fallback = getFallbackProvider(primary);
+    if (fallback) {
+      logger.error("llm", `Primary provider ${primary} failed, falling back to ${fallback}`, { error: String(err) });
+      return await _streamChatCompletion(messages, fallback);
+    }
+    throw err;
+  }
+}
+
+async function _chatCompletion(messages: ChatCompletionMessage[], provider: "gemini" | "openai"): Promise<string> {
   const model = getLLMModel(provider);
   const start = Date.now();
 
@@ -231,6 +287,20 @@ export async function chatCompletion(messages: ChatCompletionMessage[]): Promise
   });
 
   return response.choices[0]?.message?.content ?? "";
+}
+
+export async function chatCompletion(messages: ChatCompletionMessage[]): Promise<string> {
+  const primary = getPrimaryProvider();
+  try {
+    return await _chatCompletion(messages, primary);
+  } catch (err) {
+    const fallback = getFallbackProvider(primary);
+    if (fallback) {
+      logger.error("llm", `Primary provider ${primary} failed, falling back to ${fallback}`, { error: String(err) });
+      return await _chatCompletion(messages, fallback);
+    }
+    throw err;
+  }
 }
 
 export async function extractJobDetailsWithLLM(text: string): Promise<any> {
