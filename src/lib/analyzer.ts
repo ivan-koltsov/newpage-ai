@@ -68,10 +68,10 @@ function cleanText(raw: string): string {
 // ─── 2. Resume Text → ResumeData ────────────────────────────────────────────
 
 const SECTION_PATTERNS: { key: string; pattern: RegExp }[] = [
-  { key: "summary",    pattern: /\b(summary|objective|profile|about)\b/i },
-  { key: "skills",     pattern: /\b(skills|technologies|tech stack|competencies|proficiencies)\b/i },
-  { key: "experience", pattern: /\b(experience|employment|work history|professional background)\b/i },
-  { key: "education",  pattern: /\b(education|academic|degrees?|certifications?)\b/i },
+  { key: "summary",    pattern: /^[\s\p{Emoji}\W]*(summary|objective|profile|about me|about|professional summary)[\s\W]*$/ui },
+  { key: "skills",     pattern: /^[\s\p{Emoji}\W]*(skills|technologies|tech stack|competencies|proficiencies|core competencies|technical skills)[\s\W]*$/ui },
+  { key: "experience", pattern: /^[\s\p{Emoji}\W]*(experience|employment|work history|professional background|work experience|professional experience|relevant experience)[\s\W]*$/ui },
+  { key: "education",  pattern: /^[\s\p{Emoji}\W]*(education|academic|degrees?|certifications?)[\s\W]*$/ui },
 ];
 
 export function extractResumeData(text: string): ResumeData {
@@ -82,7 +82,7 @@ export function extractResumeData(text: string): ResumeData {
     skills: extractSkillTokens(sections["skills"] ?? ""),
     experience: extractExperience(sections["experience"] ?? ""),
     education: extractEducation(sections["education"] ?? ""),
-    totalYearsExperience: inferTotalYears(sections["experience"] ?? ""),
+    totalYearsExperience: inferTotalYears(sections["experience"] ?? "") || inferTotalYears(text),
   };
 }
 
@@ -126,7 +126,7 @@ function extractExperience(
 
   const entries: { company: string; role: string; bulletPoints: string[] }[] = [];
   const lines = expText.split("\n").filter((l) => l.trim());
-  const entryHeaderPattern = /^(.+?)\s+(?:at|@|-|—|–)\s+(.+?)(?:\s*[\\(|,]\s*\d{4})?/i;
+  const entryHeaderPattern = /^(.+?)\s+(?:at|@|-|—|–)\s+(.*)$/i;
   const dateLinePattern = /\b(19|20)\d{2}\b/;
   let currentEntry: { company: string; role: string; bulletPoints: string[] } | null = null;
 
@@ -135,7 +135,7 @@ function extractExperience(
     if (headerMatch || (dateLinePattern.test(line) && line.trim().length < 100)) {
       if (currentEntry) entries.push(currentEntry);
       currentEntry = headerMatch
-        ? { role: headerMatch[1].trim(), company: headerMatch[2].trim(), bulletPoints: [] }
+        ? { role: headerMatch[1].trim(), company: headerMatch[2].replace(/(?:\s*[\(|,]\s*\d{4}.*)$/, "").trim(), bulletPoints: [] }
         : { role: line.trim(), company: "", bulletPoints: [] };
     } else if (currentEntry) {
       currentEntry.bulletPoints.push(line.replace(/^[-–—*•·]\s*/, "").trim());
@@ -151,19 +151,22 @@ function extractEducation(eduText: string): string[] {
 }
 
 function inferTotalYears(expText: string): number {
+  if (!expText) return 0;
   const currentYear = new Date().getFullYear();
   const rangePattern = /\b(19|20)(\d{2})\s*[-–—to]+\s*(?:(19|20)(\d{2})|present|current|now)\b/gi;
-  let totalMonths = 0;
   let match: RegExpExecArray | null;
+  const years = new Set<number>();
 
   while ((match = rangePattern.exec(expText)) !== null) {
     const startYear = parseInt(match[1] + match[2], 10);
     const endYear = match[3] && match[4] ? parseInt(match[3] + match[4], 10) : currentYear;
     if (endYear >= startYear && startYear > 1950 && endYear <= currentYear + 1) {
-      totalMonths += (endYear - startYear) * 12;
+      for (let y = startYear; y <= endYear; y++) {
+        years.add(y);
+      }
     }
   }
-  return Math.round((totalMonths / 12) * 10) / 10;
+  return years.size > 0 ? years.size - 1 : 0;
 }
 
 // ─── 3. Comparison Engine ────────────────────────────────────────────────────
